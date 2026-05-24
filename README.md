@@ -54,31 +54,28 @@ surface 丢失时会完整释放 GL 资源再重建，避免 `GLuint` 泄漏。
 
 ## 已知问题
 
-### ⚠ 触摸穿透目前实现有误
+### ⚠ 触摸穿透与菜单交互互斥
 
-`src/main.cpp` 中：
+`TouchHelperA` 的 `readOnly` 参数目前两种取值都不完整：
 
-```cpp
-// readOnly=false → 不 GRAB 设备 → 触摸穿透到下层 app
-Touch::Init({(float)abs_ScreenX, (float)abs_ScreenY}, false);
-```
+| 模式 | 穿透到底层 app | EUI-NEO 菜单可交互 |
+|------|:-:|:-:|
+| `readOnly=true` | ✅ | ❌ |
+| `readOnly=false` | ❌ | ✅ |
 
-注释和参数的含义写反了。`readOnly=false` 实际上**会** GRAB 设备，底层 app 收不到触摸，不是真正的穿透。
+`readOnly=true` 时 TouchHelperA 不 GRAB 设备，事件由系统直接派发给底层 app，但 `glfw_shim` 的注入路径同时失效，EUI-NEO 菜单收不到触摸。
 
-正确穿透应该传 `true`：
+理想方案是在不 GRAB 设备的前提下，把触摸坐标通过独立通道注入 `glfw_shim`，两条路并行。目前没有完整实现，欢迎提 PR。
 
-```cpp
-Touch::Init({(float)abs_ScreenX, (float)abs_ScreenY}, true);
-```
+### ⚠ 软键盘无法弹出
 
-但 `readOnly=true` 时 EUI-NEO 界面能否正常响应触摸，取决于 `glfw_shim` 的注入路径，目前还没有完整跑通。欢迎提 PR。
+`glfw_shim` 层没有实现 Android IME 的调用路径，`eui_android_poll_ime_frame()` 目前是空壳，点击输入框不会唤起系统软键盘。中文输入等依赖 IME 的功能完全不可用。
 
 ### 其他待修复
 
-- **软键盘遮挡**：弹起软键盘时布局不上推，输入框容易被遮住
 - **横竖屏切换**：surface 销毁/重建在部分设备上有竞态，偶发黑屏
-- **字体路径硬编码**：路径写死在 `main.cpp`，换设备需要手动改
-- **动画停止后帧率不降**：`isAnimating()` 返回 false 后，定时器仍持续触发 recompose，导致始终以目标帧率空转
+- **字体路径硬编码**：路径写死在 `main.cpp`，换设备需手动改
+- **动画停止后帧率不降**：定时器持续触发 recompose，`isAnimating()` 返回 false 后仍以目标帧率空转
 - **颜色选择器首帧闪烁**：`g_pickedColor` 更新后要下一帧才反映到 `dslAppConfig().clearColor`
 
 ---
@@ -149,7 +146,7 @@ adb shell chmod +x /data/local/tmp/AndroidSurfaceEUI
 adb shell /data/local/tmp/AndroidSurfaceEUI
 ```
 
-> 需要 root 权限
+> 需要 root 权限，`/dev/input` 读取依赖 root。
 
 ---
 
@@ -179,8 +176,8 @@ void EuiLayoutUI(core::dsl::Ui& ui, const core::dsl::Screen& screen)
 
 欢迎提 issue 或 PR，当前最需要解决的：
 
-- 触摸穿透的正确实现（`readOnly` 模式下的注入路径）
-- 软键盘推起布局
+- 触摸穿透与菜单交互并存（`readOnly=true` 时独立注入通道）
+- Android IME 调用路径，让软键盘能弹出
 - 横竖屏切换稳定性
 - 字体路径自动探测
 
