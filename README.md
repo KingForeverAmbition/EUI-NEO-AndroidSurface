@@ -10,16 +10,16 @@
 
 | 文件 | 说明 |
 |------|------|
-| `main.cpp` | 程序入口，替代原版的 `main.cpp`（桌面 GLFW 版） |
-| `Android_EUI/eui_draw_gui.cpp` | UI 层实现，替代原 ImGui 版的 `draw_Gui.cpp` |
-| `Android_EUI/android_app_surface.cpp` | `app::` 接口的 Android 端实现 |
-| `glfw_shim/` | GLFW → EGL/ANativeWindow 的桥接层，让 EUI-NEO 的 GLFW 调用在 Android 上透明运行 |
-| `native_surface/ANativeWindowCreator` | 纯 C++ 创建 Android 悬浮窗，无需 Java |
-| `TouchHelperA` | `/dev/input` 触摸事件读取与坐标注入 |
+| `src/main.cpp` | 程序入口，替代原版桌面 GLFW 的 `main.cpp` |
+| `src/Android_EUI/android_main.cpp` | EUI-NEO 主循环适配，管理 surface 会话生命周期 |
+| `src/Android_EUI/android_app.cpp` | UI 层实现，替代原 ImGui 版的 `draw_Gui.cpp` |
+| `src/glfw_shim/glfw_shim.cpp` | GLFW → EGL/ANativeWindow 桥接，让 EUI-NEO 的 GLFW 调用在 Android 上透明运行 |
+| `src/Android_touch/TouchHelperA.cpp` | `/dev/input` 触摸事件读取与坐标注入 |
+| `include/native_surface/` | 纯 C++ 创建 Android 悬浮窗，无需 Java |
 
-### 替换/修改的文件
+### 替换/修改的内容
 
-原版的 `android_app.cpp`（gallery demo）被替换为我们自己的 `android_app_surface.cpp`，入口函数 `compose()` 对接 `EuiLayoutUI()`。
+原版的 gallery demo 入口被替换为我们自己的 `android_app.cpp`，`compose()` 对接 `EuiLayoutUI()`。
 
 Shader 预处理宏 `EUI_SHADER_PRELUDE` 由桌面的 `#version 330 core` 改为 GLES 兼容的：
 
@@ -30,21 +30,21 @@ precision highp float;
 
 ### 渲染循环
 
-原版桌面版直接用 `glfwCreateWindow` 创建系统窗口。Android 版在此基础上封装了一层 surface 会话：
+原版直接用 `glfwCreateWindow` 创建系统窗口。Android 版封装了一层 surface 会话，处理锁屏、后台切换等场景下 surface 反复销毁重建的问题：
 
 ```
 eui_android_main()
   └─ while (!exit)
-       ├─ runWindowSession()   // 创建 GLFWwindow，持续渲染直到 surface 丢失
-       ├─ wait_for_surface()   // 等待新 surface（如锁屏唤醒后）
-       └─ promote_pending_window()  // 切换到新 surface，重新进入渲染循环
+       ├─ runWindowSession()         // 创建 GLFWwindow，持续渲染直到 surface 丢失
+       ├─ wait_for_surface()         // 等待新 surface（锁屏唤醒等）
+       └─ promote_pending_window()   // 接管新 surface，重新进入渲染循环
 ```
 
 surface 丢失时会完整释放 GL 资源再重建，避免 `GLuint` 泄漏。
 
 ### 设置持久化
 
-原版 demo 没有持久化。本版本将所有用户状态以 `key=value` 格式写入 `<files-dir>/settings.txt`，每次状态变更即写入，依赖内核页缓存，实际 I/O 频率远低于帧率。
+原版 demo 没有状态保存。本版本将所有用户设置以 `key=value` 格式写入 `<files-dir>/settings.txt`，每次状态变更即写入，依赖内核页缓存，实际不会每帧落盘。
 
 ### 触摸注入
 
@@ -56,30 +56,30 @@ surface 丢失时会完整释放 GL 资源再重建，避免 `GLuint` 泄漏。
 
 ### ⚠ 触摸穿透目前实现有误
 
-当前代码中 `main.cpp` 里：
+`src/main.cpp` 中：
 
 ```cpp
 // readOnly=false → 不 GRAB 设备 → 触摸穿透到下层 app
 Touch::Init({(float)abs_ScreenX, (float)abs_ScreenY}, false);
 ```
 
-注释与参数含义写反了。`readOnly=false` 实际上会 GRAB 设备，底层 app **无法**收到触摸，并非真正穿透。
+注释和参数的含义写反了。`readOnly=false` 实际上**会** GRAB 设备，底层 app 收不到触摸，不是真正的穿透。
 
-正确的穿透应传 `readOnly=true`：
+正确穿透应该传 `true`：
 
 ```cpp
 Touch::Init({(float)abs_ScreenX, (float)abs_ScreenY}, true);
 ```
 
-但 `readOnly=true` 时 EUI-NEO 界面是否能正常响应触摸，取决于 `glfw_shim` 侧的注入路径，目前尚未完整验证。欢迎有能力的开发者提 PR。
+但 `readOnly=true` 时 EUI-NEO 界面能否正常响应触摸，取决于 `glfw_shim` 的注入路径，目前还没有完整跑通。欢迎提 PR。
 
-### 其他待修复问题
+### 其他待修复
 
-- **软键盘遮挡**：弹出软键盘时没有推起布局，输入框可能被遮住
-- **横竖屏切换**：`surface` 销毁/重建流程在部分设备上有竞态，偶发黑屏
-- **字体路径硬编码**：当前字体路径写死在 `main.cpp`，未做自动探测，换设备需手动改
-- **帧率在动画停止后无法降频**：`isAnimating()` 返回 false 时理论上应进入 `glfwWaitEvents`，但部分场景下定时器会持续触发 recompose，导致始终以目标帧率空转
-- **颜色选择器主题色更新延迟**：`g_pickedColor` 更新后需下一帧才反映到 `dslAppConfig().clearColor`，首帧有闪烁
+- **软键盘遮挡**：弹起软键盘时布局不上推，输入框容易被遮住
+- **横竖屏切换**：surface 销毁/重建在部分设备上有竞态，偶发黑屏
+- **字体路径硬编码**：路径写死在 `main.cpp`，换设备需要手动改
+- **动画停止后帧率不降**：`isAnimating()` 返回 false 后，定时器仍持续触发 recompose，导致始终以目标帧率空转
+- **颜色选择器首帧闪烁**：`g_pickedColor` 更新后要下一帧才反映到 `dslAppConfig().clearColor`
 
 ---
 
@@ -87,17 +87,24 @@ Touch::Init({(float)abs_ScreenX, (float)abs_ScreenY}, true);
 
 ```
 .
-├── main.cpp                        # 程序入口：初始化 surface、触摸、字体，启动主循环
-├── Android_EUI/
-│   ├── eui_android_config.h        # GLES shader 预处理宏、全局变量声明
-│   ├── eui_draw_gui.cpp            # 简版 UI（悬浮窗主界面）
-│   └── android_app_surface.cpp     # 完整 demo UI（控件/图表/时钟/选择器等）
-├── glfw_shim/                      # GLFW → EGL 桥接
-├── native_surface/                 # ANativeWindow 悬浮窗创建
-├── TouchHelperA/                   # /dev/input 触摸读取
-├── app/                            # 原版 app:: 接口（dsl_app.h 等）
-├── components/                     # 原版组件层（保持不动）
-└── core/                           # 原版 DSL / Runtime（保持不动）
+├── Android.mk                          # NDK 构建配置
+├── src/
+│   ├── main.cpp                        # 入口：初始化 surface、触摸、字体，启动主循环
+│   ├── glfw_shim/
+│   │   └── glfw_shim.cpp               # GLFW → EGL 桥接
+│   ├── Android_EUI/
+│   │   ├── android_main.cpp            # EUI-NEO 主循环 / surface 会话管理
+│   │   └── android_app.cpp             # UI 层（控件/图表/时钟/选择器等）
+│   └── Android_touch/
+│       └── TouchHelperA.cpp            # /dev/input 触摸读取
+├── include/
+│   ├── Android_EUI/
+│   │   └── eui_android_config.h        # GLES shader 宏、全局变量声明
+│   ├── Android_touch/                  # TouchHelperA 头文件
+│   └── native_surface/                 # ANativeWindow 悬浮窗创建
+├── core/                               # 原版 DSL / Runtime（尽量不动）
+├── 3rd/                                # 第三方单文件依赖
+└── include/                            # glad_gles 等
 ```
 
 ---
@@ -106,64 +113,60 @@ Touch::Init({(float)abs_ScreenX, (float)abs_ScreenY}, true);
 
 ### 环境要求
 
-- Android NDK r25+
-- CMake 3.14+
-- C++17
+- Android NDK r21+
+- `ndk-build` 工具链
 
-### CMake 配置
+### 构建
 
 ```bash
-cmake -S . -B build \
-  -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=arm64-v8a \
-  -DANDROID_PLATFORM=android-26 \
-  -DCMAKE_BUILD_TYPE=Release
+# 在项目根目录下
+ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk
 
-cmake --build build -j8
+# 指定 ABI（默认构建所有 ABI）
+ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk APP_ABI=arm64-v8a
 ```
 
-产物为单个可执行文件，通过 `adb push` 推送到设备运行。
+产物输出到 `libs/arm64-v8a/AndroidSurfaceEUI`。
 
 ### 字体文件
 
-目前字体路径硬编码，推送到设备时需要对应：
+字体路径目前写死，推送到设备时路径需对应：
 
 ```bash
 adb push JingNanJunJunTi.ttf /data/local/tmp/
 adb push "Font Awesome 7 Free-Solid-900.otf" /data/local/tmp/
 ```
 
-或修改 `main.cpp` 中 `eui_android_set_font_paths()` 的参数指向实际路径。
+或修改 `src/main.cpp` 中 `eui_android_set_font_paths()` 的参数。
 
 ---
 
 ## 运行
 
 ```bash
-adb push build/AndroidSurfaceEUI /data/local/tmp/
+adb push libs/arm64-v8a/AndroidSurfaceEUI /data/local/tmp/
 adb shell chmod +x /data/local/tmp/AndroidSurfaceEUI
 adb shell /data/local/tmp/AndroidSurfaceEUI
 ```
 
-需要 root 权限（`/dev/input` 读取依赖 root）。
+> 需要 root 权限
 
 ---
 
 ## 自定义 UI
 
-修改 `Android_EUI/eui_draw_gui.cpp` 中的 `EuiLayoutUI()` 函数，或直接替换 `android_app_surface.cpp`。组件用法与原版一致，参考 [原版组件文档](https://github.com/sudoevolve/EUI-NEO/blob/main/docs/组件.md)。
-
-简单示例：
+修改 `src/Android_EUI/android_app.cpp` 中的 `EuiLayoutUI()` 函数即可。组件用法与原版完全一致，参考 [原版组件文档](https://github.com/sudoevolve/EUI-NEO/blob/main/docs/组件.md)。
 
 ```cpp
-void EuiLayoutUI(core::dsl::Ui& ui, const core::dsl::Screen& screen) {
+void EuiLayoutUI(core::dsl::Ui& ui, const core::dsl::Screen& screen)
+{
     ui.stack("root")
         .size(screen.width, screen.height)
         .content([&] {
-            components::button(ui, "btn.test")
+            components::button(ui, "btn.hello")
                 .size(200.f, 50.f)
                 .text("点我")
-                .onClick([] { /* 你的逻辑 */ })
+                .onClick([] { /* 业务逻辑 */ })
                 .build();
         })
         .build();
@@ -174,14 +177,14 @@ void EuiLayoutUI(core::dsl::Ui& ui, const core::dsl::Screen& screen) {
 
 ## 贡献
 
-欢迎提 issue 或 PR，尤其是以下方向：
+欢迎提 issue 或 PR，当前最需要解决的：
 
-- 触摸穿透的正确实现
+- 触摸穿透的正确实现（`readOnly` 模式下的注入路径）
 - 软键盘推起布局
 - 横竖屏切换稳定性
 - 字体路径自动探测
 
-原版 EUI-NEO 的 core / components 层我们尽量不动，以便跟进原版更新。
+`core/` 和原版 `components/` 层尽量不动，方便后续跟进原版更新。
 
 ---
 
