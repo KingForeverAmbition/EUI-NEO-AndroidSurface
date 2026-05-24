@@ -6,7 +6,7 @@
 
 | 选择器页 | 图表页 |
 |:---:|:---:|
-| ![选择器](docs/pic/preview_pickers.jpg) | ![图表](docs/pic/preview_charts.jpg) |
+| ![选择器](1.jpg) | ![图表](2.jpg) |
 
 ---
 
