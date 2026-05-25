@@ -1,6 +1,6 @@
 # EUI-NEO · AndroidSurface 移植说明
 
-基于 [EUI-NEO](https://github.com/sudoevolve/EUI-NEO) 的 Android 纯 C++ 移植版本，不依赖 Java/Kotlin，以 `ANativeWindow` 直接创建悬浮窗，通过 `glfw_shim` 桥接 EGL，让 EUI-NEO 的整套 DSL / Components 跑在 Android 上。
+基于 [EUI-NEO](https://github.com/sudoevolve/EUI-NEO) 和 [EUI-NEO-Android](https://github.com/tomlinyuan/EUI-NEO-Android)的 Android 纯 C++ 移植版本，不依赖 Java/Kotlin，以 `ANativeWindow` 直接创建悬浮窗，通过 `glfw_shim` 桥接 EGL，让 EUI-NEO 的整套 DSL / Components 跑在 Android 上。
 
 ## 预览
 
